@@ -29,7 +29,7 @@ A **US Navy formula** column is also computed and included for comparison to ass
 ## Project Structure
 
 ```
-bodyfat-ml/
+bodyfat-analytics/
 ├── BodyFat.csv               # raw dataset downloaded from Kaggle
 ├── BodyFat_engineered.csv    # preprocessed dataset with NavyBodyFat added
 ├── data.py                   # Kaggle dataset download script
