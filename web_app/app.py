@@ -1,21 +1,4 @@
-"""
-Body Fat Predictor - Flask App
-==================================
-
-Folder structure needed:
-  your_project/
-    app.py                  <- this file
-    model_male.pkl
-    model_female.pkl
-    templates/
-      index.html            <- separate file, see below
-
-Run with:
-  python app.py
-
-Then open http://127.0.0.1:5000 in your browser.
-"""
-
+import os
 import pickle
 import threading
 import webbrowser
@@ -25,11 +8,14 @@ from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(BASE_DIR, "..", "models")
+
 MODELS = {}
 for sex in ["male", "female"]:
-    with open(f"model_{sex}.pkl", "rb") as f:
+    model_path = os.path.join(MODELS_DIR, f"model_{sex}.pkl")
+    with open(model_path, "rb") as f:
         MODELS[sex] = pickle.load(f)
-
 
 def get_category(prediction: float, sex: str) -> str:
     if sex == "male":
@@ -55,7 +41,6 @@ def get_category(prediction: float, sex: str) -> str:
         else:
             return "Above average"
 
-
 @app.route("/")
 def index():
     return render_template(
@@ -63,7 +48,6 @@ def index():
         male_features=MODELS["male"]["features"],
         female_features=MODELS["female"]["features"],
     )
-
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -90,12 +74,6 @@ def predict():
         "category": category,
     })
 
-
 if __name__ == "__main__":
-    # Open the browser shortly after the server starts, instead of
-    # immediately (the server isn't ready to accept connections yet).
     threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
-
-    # use_reloader=False prevents this from running twice - Flask's debug
-    # reloader spawns a second process, which would open two browser tabs.
     app.run(debug=True, port=5000, use_reloader=False)
