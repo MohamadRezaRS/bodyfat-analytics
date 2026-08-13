@@ -1,110 +1,83 @@
-"""
-Body Fat Prediction - Plain Linear Regression (split by sex)
-================================================================
-
-Earlier testing compared Linear, Ridge, Lasso, and ElasticNet - the
-differences between them were tiny (R2 within ~0.02 of each other on
-both sexes), so the regularization wasn't doing much real work here.
-Going with plain LinearRegression: simplest, most interpretable,
-no alpha to tune, and performance is statistically indistinguishable
-from the regularized versions.
-
-Features (same as round 2):
-  Male  : Abdomen, Chest, Hip, Weight, Thigh, Neck
-  Female: Abdomen, Hip, Weight, Biceps, Thigh, Forearm
-
-This script checks for OVERFITTING / UNDERFITTING using learning curves
-(numbers printed to terminal - train R2 vs CV R2 and the gap between
-them), then trains a final model on the FULL dataset per sex and saves
-it to disk for later use (e.g. the Streamlit app).
-
-How to read the printed gap:
-  - Both scores low and close together           -> underfitting
-    (model too simple / features not informative enough)
-  - Training score high, CV score much lower      -> overfitting
-    (model memorizing training data, not generalizing)
-  - Both converge to a reasonably high score
-    as training size grows                        -> good fit
-
-Saves:
-  model_male.pkl    - trained pipeline (scaler + LinearRegression) for males
-  model_female.pkl  - trained pipeline (scaler + LinearRegression) for females
-  Each pickle contains the full sklearn Pipeline, so no separate scaler
-  file is needed - load the pickle and call .predict() directly.
-"""
-
 import pickle
-import warnings
-
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import KFold, learning_curve
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.model_selection import KFold, cross_validate
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+import warnings
 warnings.filterwarnings("ignore")
 
-RANDOM_STATE = 42
-N_FOLDS = 10
-
-# ── load & split by sex ──────────────────────────────────────────────────────
-df = pd.read_csv("BodyFat_engineered.csv")
-
-FEATURES_BY_SEX = {
-    "Male":   ["Abdomen", "Chest", "Hip", "Weight", "Thigh", "Neck"],
-    "Female": ["Abdomen", "Hip", "Weight", "Biceps", "Thigh", "Forearm"],
-}
+"""
+I am training three distinct models (Linear Regression, Random Forest, and SVR) 
+to combat the inherent risks of our extremely small dataset size. When dealing 
+with a limited number of instances, complex models tend to memorize the training 
+data (overfitting) rather than learning the underlying signal, which destroys 
+out-of-sample performance. Linear Regression provides a strict, interpretable baseline. 
+"""
 
 datasets = {
-    "Male":   df[df["Sex"].str.strip().str.upper() == "M"].reset_index(drop=True),
-    "Female": df[df["Sex"].str.strip().str.upper() == "F"].reset_index(drop=True),
+    "Male": pd.read_csv("data/processed/processed_male.csv"),
+    "Female": pd.read_csv("data/processed/processed_female.csv")
 }
 
+def get_pipelines():
+    return {
+        "LinearRegression": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", LinearRegression())
+        ]),
+        "RandomForest": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", RandomForestRegressor(max_depth=4, random_state=42))
+        ]),
+        "SVR": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", SVR(kernel="rbf", C=1.0, epsilon=0.1))
+        ])
+    }
 
-def make_model():
-    return Pipeline([
-        ("scale", StandardScaler()),
-        ("model", LinearRegression()),
-    ])
+scoring_metrics = {
+    "r2": "r2",
+    "mae": "neg_mean_absolute_error",
+    "rmse": "neg_root_mean_squared_error"
+}
 
+for gender, df in datasets.items():
+    X = df.drop(columns=["BodyFat"])
+    y = df["BodyFat"]
+    feature_names = list(X.columns)
 
-for label, data in datasets.items():
-    feats = FEATURES_BY_SEX[label]
-    X = data[feats]
-    y = data["BodyFat"]
+    print(gender)
+    
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    models = get_pipelines()
+    
+    best_score = -np.inf
+    best_model_name = None
+    best_pipeline = None
 
-    print(f"\n{'='*55}")
-    print(f"  {label}  (n={len(X)}, features={feats})")
-    print(f"{'='*55}")
+    for name, pipeline in models.items():
+        scores = cross_validate(pipeline, X, y, cv=cv, scoring=scoring_metrics)
+        
+        mean_r2 = scores["test_r2"].mean()
+        mean_mae = -scores["test_mae"].mean()
+        mean_rmse = -scores["test_rmse"].mean()
+        
+        print(f"{name} -> R2: {mean_r2:.4f} | MAE: {mean_mae:.4f} | RMSE: {mean_rmse:.4f}")
+        
+        if mean_r2 > best_score:
+            best_score = mean_r2
+            best_model_name = name
+            best_pipeline = pipeline
 
-    cv = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    print(f"best model: {best_model_name} (R2: {best_score:.4f})\n")
 
-    train_sizes, train_scores, val_scores = learning_curve(
-        make_model(), X, y,
-        cv=cv,
-        scoring="r2",
-        train_sizes=np.linspace(0.2, 1.0, 8),
-        random_state=RANDOM_STATE,
-    )
+    best_pipeline.fit(X, y)
 
-    train_mean = train_scores.mean(axis=1)
-    val_mean = val_scores.mean(axis=1)
-
-    print(f"  Final training R2:   {train_mean[-1]:.3f}")
-    print(f"  Final CV R2:         {val_mean[-1]:.3f}")
-    print(f"  Gap (train - CV):    {train_mean[-1] - val_mean[-1]:.3f}")
-
-    # ── train final model on the FULL dataset and save it ──────────────────
-    # (the learning curve above already validated this approach via CV;
-    # once validated, the final deployed model is fit on all available data)
-    final_pipeline = make_model()
-    final_pipeline.fit(X, y)
-
-    filename = f"model_{label.lower()}.pkl"
-    with open(filename, "wb") as f:
-        pickle.dump({"pipeline": final_pipeline, "features": feats}, f)
-
-    print(f"  Saved -> {filename}")
-
-print("\nDone. .pkl files are ready to be loaded by the Streamlit app.")
+    file_path = f"models/model_{gender.lower()}.pkl"
+    with open(file_path, "wb") as f:
+        pickle.dump({"pipeline": best_pipeline, "features": feature_names}, f)
