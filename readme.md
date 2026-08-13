@@ -54,7 +54,7 @@ bodyfat-analytics/
 
 ## Methodology
 
-### Preprocessing (`notebooks/01_eda_and_preprocessing.ipynb`)
+### Preprocessing (`notebooks/EDA_&_FE.ipynb`)
 
 - Downloads dataset via `src/data_ingestion.py` (uses Kaggle API, saves to `data/raw/`)
 - Drops the "in original dataset" indicator column (no predictive value)
