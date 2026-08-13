@@ -28,35 +28,43 @@ A **US Navy formula** column is also computed and included for comparison to ass
 
 ## Project Structure
 
-```
+```text
 bodyfat-analytics/
-├── BodyFat.csv               # raw dataset downloaded from Kaggle
-├── BodyFat_engineered.csv    # preprocessed dataset with NavyBodyFat added
-├── data.py                   # Kaggle dataset download script
-├── preprocessing.ipynb       # full preprocessing and EDA notebook:
-│                             #   unit conversion, Navy formula, correlation
-│                             #   analysis by sex, model comparison, learning curves
-├── train&save.py             # trains final models on full dataset, saves .pkl files
-├── model_male.pkl            # trained pipeline (StandardScaler + LinearRegression) for males
-├── model_female.pkl          # trained pipeline (StandardScaler + LinearRegression) for females
-├── app.py                    # Flask web app (auto-opens browser on run)
-└── templates/
-    └── index.html            # frontend: inputs, prediction, lean mass & fat goal calculator
+├── data/
+│   ├── raw/                        # Raw downloaded Kaggle dataset
+│   └── processed/                  # Cleaned datasets split by sex (anomalies removed)
+├── notebooks/
+│   └── EDA_&_FE.ipynb  # Full EDA, IQR outlier removal, and correlation analysis
+├── src/
+│   ├── data_ingestion.py           # Kaggle API download script
+│   └── train_models.py             # Model evaluation and pipeline export script
+├── models/
+│   ├── model_male.pkl              # Final trained pipeline for males
+│   └── model_female.pkl            # Final trained pipeline for females
+├── web_app/
+│   ├── app.py                      # Flask web application backend
+│   └── templates/
+│       └── index.html              # Frontend UI
+├── .gitignore
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
 ## Methodology
 
-### Preprocessing (`preprocessing.ipynb`)
+### Preprocessing (`notebooks/01_eda_and_preprocessing.ipynb`)
 
-- Downloads dataset via `data.py` (uses Kaggle API, saves as `BodyFat.csv`)
+- Downloads dataset via `src/data_ingestion.py` (uses Kaggle API, saves to `data/raw/`)
 - Drops the "in original dataset" indicator column (no predictive value)
 - Fixes unit inconsistency: `Height` was stored in meters, converted to cm for consistency with circumference columns
+- Applies Interquartile Range (IQR) filtering to remove extreme physical measurement anomalies.
 - Adds `NavyBodyFat` using the US Navy circumference formula:
   - **Male:** `86.010 × log10(Abdomen − Neck) − 70.041 × log10(Height) + 36.76`
   - **Female:** `163.205 × log10(Waist + Hip − Neck) − 97.684 × log10(Height) − 78.387`
   - All measurements converted to inches before applying the formula
+- Splits and exports cleaned subsets to `data/processed/`.
 
 ### Feature Selection
 
@@ -77,21 +85,23 @@ Reducing from 13 to 6 features cost less than 0.002 R² — effectively zero acc
 
 ### Model Selection
 
-**→ Plain LinearRegression chosen for both models.**
+Multiple algorithms (Linear Regression, Random Forest Regressor, SVR) were evaluated to mitigate the risk of overfitting on a small dataset. 
 
-**Final performance (10-fold CV):**
+**→ Plain LinearRegression was selected as the best performing model for both cohorts.**
 
-| Sex    | R² (mean ± std) | MAE   | RMSE  |
-|--------|-----------------|-------|-------|
-| Male   | 0.679 ± 0.089   | 3.69  | 4.50  |
-| Female | 0.516 ± 0.234   | 2.87  | 3.65  |
+**Final performance (5-fold CV):**
+
+| Sex    | R²     | MAE    | RMSE   |
+|--------|--------|--------|--------|
+| Male   | 0.6977 | 3.5681 | 4.3619 |
+| Female | 0.5493 | 2.9189 | 3.7108 |
 
 ### Overfitting / Underfitting Check
 
-Learning curves were generated in `preprocessing.ipynb` (training R² vs CV R² across training sizes):
+Learning curves were generated (training R² vs CV R² across training sizes):
 
-- **Male:** ~0.05 gap at full training size, curves converge cleanly → good fit
-- **Female:** ~0.11 gap, CV curve slightly still rising at n=184 → mild underfitting from limited data, not overfitting
+- **Male:** Curves converge cleanly → good fit
+- **Female:** CV curve slightly still rising at dataset limit → mild underfitting from limited data, not overfitting
 
 Neither model overfits. Female model variance is higher due to smaller sample size and more complex fat distribution patterns.
 
@@ -100,19 +110,19 @@ Neither model overfits. Female model variance is higher due to smaller sample si
 ## Running the App
 
 ```bash
-pip install flask pandas scikit-learn numpy matplotlib kagglehub
+pip install -r "requirements.txt"
 
 # Step 1: download dataset (requires Kaggle API token in ~/.kaggle/kaggle.json)
-python data.py
+python src/data_ingestion.py
 
-# Step 2: run preprocessing notebook to generate BodyFat_engineered.csv
-# Open preprocessing.ipynb in VS Code or Jupyter and run all cells
+#run preprocessing notebook to generate processed data
+#open notebooks/EDA_&_FE.ipynb 
 
-# Step 3: train models and save .pkl files
-python "train&save.py"
+#evaluate models and save .pkl files
+python src/train_models.py
 
-# Step 4: launch web app (opens browser automatically)
-python app.py
+#launch web app (opens browser automatically)
+python web_app/app.py
 ```
 
 Then open [http://127.0.0.1:5000](http://127.0.0.1:5000)
@@ -124,8 +134,8 @@ Then open [http://127.0.0.1:5000](http://127.0.0.1:5000)
 - Predicts body fat % with a reference category (Essential / Athletic / Fitness / Average / Above average)
 - **Lean mass & goal calculator** — appears after prediction, shows fat mass and lean mass, lets you type a target body fat % and calculates exactly how many kg of fat to gain or lose:
 
-```
-lean_mass  = weight × (1 − bf% / 100)
+```text
+lean_mass   = weight × (1 − bf% / 100)
 goal_weight = lean_mass / (1 − target_bf% / 100)
 fat_change  = goal_weight − current_weight
 ```
@@ -134,7 +144,7 @@ fat_change  = goal_weight − current_weight
 
 ## Dependencies
 
-```
+```text
 pandas
 numpy
 scikit-learn
